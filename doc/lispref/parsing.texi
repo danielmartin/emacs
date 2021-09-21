@@ -21,24 +21,26 @@ Emacs also provides integration with tree-sitter library
 library implements an incremental parser and has support from a wide
 range of programming languages.
 
+TODO: xref to font-lock and indent once manuals for them are written.
+
 To access the syntax tree of the text in a buffer, we need to first
 load a language definition and create a parser with it.  Next, we can
 query the parser for specific nodes in the syntax tree.  Then, we can
-access various information about the node.  Finally, we can
-pattern-match a node with a powerful syntax.  The following sections
-explain how to do each of the tasks in detail.
+access various information about the node, and we can pattern-match a
+node with a powerful syntax.  Finally, we introduce some handy
+utilities for developing packages using tree-sitter features.  The
+following sections explain how to do each of the tasks in detail.
 
 @menu
-* Language Definitions::   Loading tree-sitter language definitions.
-* Using Parser::           Introduction to parsers.
-* Retrieving Node::        Retrieving node from syntax tree.
-* Accessing Node::         Accessing node information.
-* Pattern Matching::       Pattern matching with query patterns.
-* Multiple Languages::     Parse text written in multiple languages.
-* Tree-sitter C API::      Compare the C API and the ELisp API.
+* Language Definitions::     Loading tree-sitter language definitions.
+* Using Parser::             Introduction to parsers.
+* Retrieving Node::          Retrieving node from syntax tree.
+* Accessing Node::           Accessing node information.
+* Pattern Matching::         Pattern matching with query patterns.
+* Multiple Languages::       Parse text written in multiple languages.
+* Develop with tree-sitter:: Develop packages using tree-sitter features.
+* Tree-sitter C API::        Compare the C API and the ELisp API.
 @end menu
-
-FIXME: We should document all the tree-sitter specific signals.
 
 @node Language Definitions
 @section Tree-sitter Language Definitions
@@ -135,23 +137,9 @@ We can also represent it in s-expression:
 Names like @code{root}, @code{expression}, @code{number},
 @code{operator} are nodes' @dfn{type}.  However, not all nodes in a
 syntax tree have a type.  Nodes that don't are @dfn{anonymous nodes},
-and nodes with a type are @dfn{named nodes}.  Anonymous nodes usually
-represent punctuation marks (FIXME: better word than ``puncturation
-marks''?) like quote @samp{"} and bracket @samp{[}, or tokens that
-have a fixed representation, such as keywords like @code{return}.
-
-@c For example, a return expression could be defined as the @code{return}
-@c keyword followed by any expression and a semicolon:
-
-@c @example
-@c (return_expression "return" (expression) ";")
-@c @end example
-
-@c @noindent
-@c The text that corresponds to an @code{expression} node can be
-@c different from node to node.  It can be @code{1}, @code{"string"}, a
-@c function call, anything; but the @code{return} keyword and the
-@c semicolon are always the same.
+and nodes with a type are @dfn{named nodes}.  Anonymous nodes are
+tokens with fixed spellings, including punctuation characters like
+bracket @samp{]}, and keywords like @code{return}.
 
 @subheading Field names
 
@@ -174,14 +162,12 @@ nodes.  For example, a @code{function_definition} node could have a
 Authors of language definitions define the @dfn{grammar} of a
 language, and this grammar determines how does a parser construct a
 concrete syntax tree out of the text.  In order to used the syntax
-tree effectively, we need to read the grammar definition.
+tree effectively, we need to read the @dfn{grammar file}.
 
-FIXME: this is gone, any chance to get it back?
-
-@deffn Command tree-sitter-show-language-grammar language
-This command displays the grammar definition of @var{language} in a
-new buffer.
-@end deffn
+The grammar file is usually @code{grammar.js} in a language
+definition’s project repository.  The link to a language definition’s
+home page can be found in tree-sitter’s homepage
+(@uref{https://tree-sitter.github.io/tree-sitter}).
 
 The grammar is written in JavaScript syntax.  For example, the rule
 matching a @code{function_definition} node looks like
@@ -396,27 +382,6 @@ there is no way to update the result.
 
 This function parses @var{string} with @var{language}, and returns the
 root node of the generated syntax tree.
-@end defun
-
-FIXME: better placement?
-
-@vindex tree-sitter-disabled-modes
-@vindex tree-sitter-maximum-size
-Sometimes a user don't want to use tree-sitter features for a major
-mode.  To turn-off tree-sitter for a mode, they add the mode to
-@var{tree-sitter-disabled-modes}.  If they want to turn off
-tree-sitter for buffers larger than a particular size (because
-tree-sitter consumes memory ~10 times the buffer size for storing the
-syntax tree), they set @var{tree-sitter-maximum-size}.
-
-@defun tree-sitter-should-enable-p &optional mode
-This function returns non-nil if @var{mode} (default to the current
-major mode) should activate tree-sitter features.  The result depends
-on the value of @var{tree-sitter-disabled-modes} and
-@var{tree-sitter-maximum-size} described above.
-
-Writer of major modes or other packages are responsible for calling
-this function and determine whether to activate tree-sitter features.
 @end defun
 
 @node Retrieving Node
@@ -1147,11 +1112,60 @@ We first parse with HTML, then set ranges for CSS and JavaScript:
 @end group
 @end example
 
-We used query pattern @code{(style_element (raw_text) @@capture)} to
+We use a query pattern @code{(style_element (raw_text) @@capture)} to
 find CSS nodes in the HTML parse tree. For how to write query
 patterns, @pxref{Pattern Matching}.
 
-FIXME: mention font-lock and indenting
+@node Develop with tree-sitter
+@section Developing packages with tree-sitter
+
+@vindex tree-sitter-disabled-modes
+@vindex tree-sitter-maximum-size
+Sometimes a user don't want to use tree-sitter features for a major
+mode.  To turn-off tree-sitter for a mode, they add that mode to
+@var{tree-sitter-disabled-modes}.  If they want to turn off
+tree-sitter for buffers larger than a particular size (because
+tree-sitter consumes memory ~10 times the buffer size for storing the
+syntax tree), they set @var{tree-sitter-maximum-size}.
+
+@defun tree-sitter-should-enable-p &optional mode
+This function returns non-nil if @var{mode} (default to the current
+major mode) should activate tree-sitter features.  The result depends
+on the value of @var{tree-sitter-disabled-modes} and
+@var{tree-sitter-maximum-size} described above.
+
+Writer of major modes or other packages are responsible for calling
+this function and determine whether to activate tree-sitter features.
+@end defun
+
+@deffn Command tree-sitter-inspect-mode
+This minor mode displays the node that @emph{starts} at point in
+mode-line.  The mode-line will display
+
+@example
+@var{parent} @var{field-name}: (@var{child} (@var{grand-child} (...)))
+@end example
+
+@var{child}, @var{grand-child}, and @var{grand-grand-child}, etc, are
+nodes that have their beginning at point.  And @var{parent} is the
+parent of @var{child}.
+
+If there is no node that starts at point, i.e., point is in the middle
+of a node, then the mode-line only displays the smallest node that
+spans point, and its immediate parent.
+
+This minor mode doesn't create parsers on its own.  It simply uses the
+first parser in @var{tree-sitter-parser-list}.
+@end deffn
+
+@deffn Command tree-sitter-check-indent mode
+This command is useful for creating tree-sitter-powered indentation
+from an existing major mode.  It compares the indentation of the
+current buffer with the indentation would be done by @var{mode}, and
+displays a diff between them.  The correct indentation by @var{mode}
+is displayed in green (addition), and the indentation in the current
+buffer is shown in red (deletion).
+@end deffn
 
 @node Tree-sitter C API
 @section Tree-sitter C API Correspondence

@@ -1804,11 +1804,9 @@ Each SETTING controls one parser (often of different languages).
 LANGUAGE is the language symbol.  See Info node `(elisp)Language
 Definitions'.
 
-PATTERN is a string containing tree-sitter queries.  See Info
-node `(elisp)Pattern Matching' for writing query pattern.
-
-See Info node `(elisp)Multiple Languages' for what does it mean
-to set ranges for a parser.
+PATTERN is either a string pattern or a sexp pattern.
+See Info node `(elisp)Pattern Matching' for writing query
+pattern.
 
 Generally, major-modes should set
 `font-lock-tree-sitter-defaults', and let Emacs automatically

@@ -249,7 +249,7 @@
       (setq js-range
             (tree-sitter-query-range
              'tree-sitter-html
-             "(script_element (raw_text) @capture)"))
+             '((script_element (raw_text) @capture))))
       (should (equal '((15 . 16)) js-range))
       (tree-sitter-parser-set-included-ranges js js-range)
       (should (equal "(program (expression_statement (number)))"
@@ -259,7 +259,7 @@
       (setq css-range
             (tree-sitter-query-range
              'tree-sitter-html
-             "(style_element (raw_text) @capture)"))
+             '((style_element (raw_text) @capture))))
       (should (equal '((32 . 39)) css-range))
       (tree-sitter-parser-set-included-ranges css css-range)
       (should

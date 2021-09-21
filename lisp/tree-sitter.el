@@ -206,16 +206,14 @@ language symbol, use the root node of the first parser using that
 language; if a parser, use the root node of that parser; if a
 node, use that node.
 
-PATTERN is either a string containing one or more matching patterns,
-or a list containing one or more s-expression matching patterns.  See
-Info node `(elisp)Parsing' for how to write a query pattern in either
+PATTERN is either a string pattern, or a sexp patterns.  See Info node
+`(elisp)Pattern Matching' for how to write a query pattern in either
 string or s-expression form.
 
 BEG and END, if _both_ non-nil, specifies the range in which the query
 is executed.
 
-Raise an tree-sitter-query-error if PATTERN is malformed.  See
-Info node `(elisp)Pattern Matching' for how to read the error message."
+Raise an tree-sitter-query-error if PATTERN is malformed."
   (tree-sitter-query-capture
    (cond ((symbolp source) (tree-sitter-buffer-root-node source))
          ((tree-sitter-parser-p source)
@@ -246,81 +244,6 @@ captured node.  Capture names don't matter."
            for node = (cdr capture)
            collect (cons (tree-sitter-node-start node)
                          (tree-sitter-node-end node))))
-
-(defun tree-sitter-expand-pattern (pattern-list)
-  "Expand PATTERN-LIST to its string form.
-Each PATTERN in PATTERN-LIST can be
-
-    :anchor
-    :?
-    :*
-    :+
-    (TYPE PATTERN...)
-    [PATTERN...]
-    FIELD-NAME:
-    @CAPTURE-NAME
-    (_)
-    _
-    \"TYPE\"
-
-Consult Info node `(elisp)Pattern Matching' form detailed
-explanation."
-  (string-join (mapcar
-                #'tree-sitter-expand-pattern-1
-                pattern-list)
-               " "))
-
-(defun tree-sitter-expand-pattern-1 (pattern)
-  "Expand PATTERN to its string form.
-
-PATTERN can be
-
-    :anchor
-    :?
-    :*
-    :+
-    (TYPE PATTERN...)
-    [PATTERN...]
-    FIELD-NAME:
-    @CAPTURE-NAME
-    (_)
-    _
-    \"TYPE\"
-
-Consult Info node `(elisp)Pattern Matching' form detailed
-explanation."
-  (pcase pattern
-    (:anchor ".")
-    (:? "?")
-    (:* "*")
-    (:+ "+")
-    ((pred vectorp) (concat
-                     "["
-                     (mapconcat #'tree-sitter-expand-pattern-1
-                                pattern " ")
-                     "]"))
-    ((pred listp) (concat
-                   "("
-                   (mapconcat #'tree-sitter-expand-pattern-1
-                              pattern " ")
-                   ")"))
-    (_ (format "%S" pattern))))
-
-;;; Language API supplement
-
-(defun tree-sitter-display-grammar (language)
-  "Show the language grammar definition of LANGUAGE."
-  (interactive (list (intern (read-string "Language: "
-                                          "tree-sitter-"))))
-  (pop-to-buffer
-   (with-current-buffer
-       (get-buffer-create (format "*Grammar: %s*" language))
-     (let ((inhibit-read-only t))
-       (erase-buffer)
-       (insert (funcall (intern (format "%s-grammar" language))))
-       (javascript-mode))
-     (goto-char (point-min))
-     (current-buffer))))
 
 ;;; Range API supplement
 
@@ -594,6 +517,20 @@ For NODE, PARENT and BOL see `tree-sitter-indent'."
                            anchor (list node parent bol))
                           offset))))
 
+(defun tree-sitter-check-indent (mode)
+  "Check current buffer's indentation against a major mode MODE.
+
+Pops up a diff buffer showing the difference.  Correct
+indentation (target) is in green, current wrong indentation is in
+red."
+  (interactive "CTarget major mode: ")
+  (let ((source-buf (current-buffer)))
+    (with-temp-buffer
+      (insert-buffer-substring source-buf)
+      (funcall mode)
+      (indent-region (point-min) (point-max))
+      (diff-buffers source-buf (current-buffer)))))
+
 ;;; Lab
 
 (define-derived-mode json-mode js-mode "JSON"
@@ -603,10 +540,10 @@ For NODE, PARENT and BOL see `tree-sitter-indent'."
 
 (defvar json-tree-sitter-settings-1
   '(tree-sitter-json
-    "(string) @font-lock-string-face
-(true) @font-lock-constant-face
-(false) @font-lock-constant-face
-(null) @font-lock-constant-face"))
+    ((string) @font-lock-string-face
+     (true) @font-lock-constant-face
+     (false) @font-lock-constant-face
+     (null) @font-lock-constant-face)))
 
 (defun ts-c-fontify-system-lib (beg end _)
   "Fortify a #include <lib>.
@@ -668,8 +605,8 @@ and the lib name in string-face."
      ((node-is "else") parent 0)
 
      ;; Switch case.
-     ((node-is "case_statement") parent 0)
      ((parent-is "case_statement") parent 2)
+     ((node-is "case_statement") parent 0)
 
      ;; { and }.
      ((node-is "compound_statement") parent 2)
@@ -686,104 +623,105 @@ and the lib name in string-face."
                 collect `((match nil ,type nil 1) first-child 0)))))
 
 (defvar ts-c-tree-sitter-settings-1
-  '(tree-sitter-c "(null) @font-lock-constant-face
-(true) @font-lock-constant-face
-(false) @font-lock-constant-face
+  '(tree-sitter-c
+    ((null) @font-lock-constant-face
+     (true) @font-lock-constant-face
+     (false) @font-lock-constant-face
 
-(comment) @font-lock-comment-face
+     (comment) @font-lock-comment-face
 
-(system_lib_string) @ts-c-fontify-system-lib
+     (system_lib_string) @ts-c-fontify-system-lib
 
-(unary_expression
-  operator: _ @font-lock-negation-char-face)
+     (unary_expression
+      operator: _ @font-lock-negation-char-face)
 
-(string_literal) @font-lock-string-face
-(char_literal) @font-lock-string-face
-
-
-
-(function_definition
-  declarator: (identifier) @font-lock-function-name-face)
-
-(declaration
-  declarator: (identifier) @font-lock-function-name-face)
-
-(function_declarator
- declarator: (identifier) @font-lock-function-name-face)
+     (string_literal) @font-lock-string-face
+     (char_literal) @font-lock-string-face
 
 
 
-(init_declarator
- declarator: (identifier) @font-lock-variable-name-face)
+     (function_definition
+      declarator: (identifier) @font-lock-function-name-face)
 
-(parameter_declaration
- declarator: (identifier) @font-lock-variable-name-face)
+     (declaration
+      declarator: (identifier) @font-lock-function-name-face)
 
-(preproc_def
- name: (identifier) @font-lock-variable-name-face)
-
-(enumerator
- name: (identifier) @font-lock-variable-name-face)
-
-(field_identifier) @font-lock-variable-name-face
-
-(parameter_list
- (parameter_declaration
-  (identifier) @font-lock-variable-name-face))
-
-(pointer_declarator
- declarator: (identifier) @font-lock-variable-name-face)
-
-(array_declarator
- declarator: (identifier) @font-lock-variable-name-face)
-
-(preproc_function_def
- name: (identifier) @font-lock-variable-name-face
- parameters: (preproc_params
-              (identifier) @font-lock-variable-name-face))
+     (function_declarator
+      declarator: (identifier) @font-lock-function-name-face)
 
 
 
-(type_identifier) @font-lock-type-face
-(primitive_type) @font-lock-type-face
+     (init_declarator
+      declarator: (identifier) @font-lock-variable-name-face)
 
-\"auto\" @font-lock-keyword-face
-\"break\" @font-lock-keyword-face
-\"case\" @font-lock-keyword-face
-\"const\" @font-lock-keyword-face
-\"continue\" @font-lock-keyword-face
-\"default\" @font-lock-keyword-face
-\"do\" @font-lock-keyword-face
-\"else\" @font-lock-keyword-face
-\"enum\" @font-lock-keyword-face
-\"extern\" @font-lock-keyword-face
-\"for\" @font-lock-keyword-face
-\"goto\" @font-lock-keyword-face
-\"if\" @font-lock-keyword-face
-\"register\" @font-lock-keyword-face
-\"return\" @font-lock-keyword-face
-\"sizeof\" @font-lock-keyword-face
-\"static\" @font-lock-keyword-face
-\"struct\" @font-lock-keyword-face
-\"switch\" @font-lock-keyword-face
-\"typedef\" @font-lock-keyword-face
-\"union\" @font-lock-keyword-face
-\"volatile\" @font-lock-keyword-face
-\"while\" @font-lock-keyword-face
+     (parameter_declaration
+      declarator: (identifier) @font-lock-variable-name-face)
 
-\"long\" @font-lock-type-face
-\"short\" @font-lock-type-face
-\"signed\" @font-lock-type-face
-\"unsigned\" @font-lock-type-face
+     (preproc_def
+      name: (identifier) @font-lock-variable-name-face)
 
-\"#include\" @font-lock-preprocessor-face
-\"#define\" @font-lock-preprocessor-face
-\"#ifdef\" @font-lock-preprocessor-face
-\"#ifndef\" @font-lock-preprocessor-face
-\"#endif\" @font-lock-preprocessor-face
-\"#else\" @font-lock-preprocessor-face
-\"#elif\" @font-lock-preprocessor-face
-"))
+     (enumerator
+      name: (identifier) @font-lock-variable-name-face)
+
+     (field_identifier) @font-lock-variable-name-face
+
+     (parameter_list
+      (parameter_declaration
+       (identifier) @font-lock-variable-name-face))
+
+     (pointer_declarator
+      declarator: (identifier) @font-lock-variable-name-face)
+
+     (array_declarator
+      declarator: (identifier) @font-lock-variable-name-face)
+
+     (preproc_function_def
+      name: (identifier) @font-lock-variable-name-face
+      parameters: (preproc_params
+                   (identifier) @font-lock-variable-name-face))
+
+
+
+     (type_identifier) @font-lock-type-face
+     (primitive_type) @font-lock-type-face
+
+     "auto" @font-lock-keyword-face
+     "break" @font-lock-keyword-face
+     "case" @font-lock-keyword-face
+     "const" @font-lock-keyword-face
+     "continue" @font-lock-keyword-face
+     "default" @font-lock-keyword-face
+     "do" @font-lock-keyword-face
+     "else" @font-lock-keyword-face
+     "enum" @font-lock-keyword-face
+     "extern" @font-lock-keyword-face
+     "for" @font-lock-keyword-face
+     "goto" @font-lock-keyword-face
+     "if" @font-lock-keyword-face
+     "register" @font-lock-keyword-face
+     "return" @font-lock-keyword-face
+     "sizeof" @font-lock-keyword-face
+     "static" @font-lock-keyword-face
+     "struct" @font-lock-keyword-face
+     "switch" @font-lock-keyword-face
+     "typedef" @font-lock-keyword-face
+     "union" @font-lock-keyword-face
+     "volatile" @font-lock-keyword-face
+     "while" @font-lock-keyword-face
+
+     "long" @font-lock-type-face
+     "short" @font-lock-type-face
+     "signed" @font-lock-type-face
+     "unsigned" @font-lock-type-face
+
+     "#include" @font-lock-preprocessor-face
+     "#define" @font-lock-preprocessor-face
+     "#ifdef" @font-lock-preprocessor-face
+     "#ifndef" @font-lock-preprocessor-face
+     "#endif" @font-lock-preprocessor-face
+     "#else" @font-lock-preprocessor-face
+     "#elif" @font-lock-preprocessor-face
+     )))
 
 
 ;;; Debugging
@@ -795,7 +733,8 @@ and the lib name in string-face."
   "Show information of the node at point.
 If called interactively, show in echo area, otherwise set
 `tree-sitter--inspect-name' (which will appear in the mode-line
-if `tree-sitter-inspect-mode' is enabled)."
+if `tree-sitter-inspect-mode' is enabled).  Uses the first parser
+in `tree-sitter-parser-list'."
   (interactive "p")
   ;; NODE-LIST contains all the node that starts at point.
   (let* ((node-list
@@ -842,16 +781,20 @@ if `tree-sitter-inspect-mode' is enabled)."
 (define-minor-mode tree-sitter-inspect-mode
   "Shows the node that _starts_ at point in the mode-line.
 
-The mode-line displays some thing like:
+The mode-line displays
 
-    (parent field-name: (child (grand-child (...))))
+    PARENT FIELD-NAME: (CHILD (GRAND-CHILD (...)))
 
 CHILD, GRAND-CHILD, and GRAND-GRAND-CHILD, etc, are nodes that
-have their beginning at point.  And parent is the parent of the
-largest among them, CHILD.
+have their beginning at point.  And PARENT is the parent of
+CHILD.
 
 If no node starts at point, i.e., point is in the middle of a
-node, then we just display the node at point and its parent."
+node, then we just display the smallest node that spans point and
+its immediate parent.
+
+This minor mode doesn't create parsers on its own.  It simply
+uses the first parser in `tree-sitter-parser-list'."
   :lighter nil
   (if tree-sitter-inspect-mode
       (progn
@@ -864,6 +807,42 @@ node, then we just display the node at point and its parent."
     (setq mode-line-misc-info
           (remove '(:eval tree-sitter--inspect-name)
                   mode-line-misc-info))))
+
+;;; Tree-sitter devel
+
+(defun tree-sitter--check-manual-covarage ()
+  "Print tree-sitter functions missing from the manual in message buffer."
+  (interactive)
+  (let ((functions-in-source
+         (with-temp-buffer
+           (insert-file-contents (find-library-name "tree-sitter"))
+           (cl-remove-if
+            (lambda (name) (string-match "tree-sitter--" name))
+            (cl-sort
+             (save-excursion
+               (goto-char (point-min))
+               (cl-loop while (re-search-forward
+                               "^(defun \\([^ ]+\\)" nil t)
+                        collect (match-string-no-properties 1)))
+             #'string<))))
+        (functions-in-manual
+         (with-temp-buffer
+           (insert-file-contents (expand-file-name
+                                  "doc/lispref/parsing.texi"
+                                  source-directory))
+           (cl-sort
+            (save-excursion
+              (goto-char (point-min))
+              (cl-loop while (re-search-forward
+                              "^@defun \\([^ ]+\\)" nil t)
+                       collect (match-string-no-properties 1)))
+            #'string<))))
+    (message "Missing: %s"
+             (string-join
+              (cl-remove-if
+               (lambda (name) (member name functions-in-manual))
+               functions-in-source)
+              "\n"))))
 
 (provide 'tree-sitter)
 

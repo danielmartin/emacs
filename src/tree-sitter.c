@@ -1059,6 +1059,8 @@ If any one of NODE1 and NODE2 is nil, return nil.  */)
 
 /*** Query functions */
 
+/* If we decide to pre-load tree-sitter.el, maybe we can implement
+   this function in Lisp.  */
 DEFUN ("tree-sitter-expand-pattern-1",
        Ftree_sitter_expand_pattern_1,
        Stree_sitter_expand_pattern_1, 1, 1, 0,
@@ -1159,16 +1161,14 @@ DEFUN ("tree-sitter-query-capture",
 Returns a list of (CAPTURE_NAME . NODE).  CAPTURE_NAME is the name
 assigned to the node in PATTERN.  NODE is the captured node.
 
-PATTERN is either a string containing one or more matching patterns,
-or a list containing one or more s-expression matching patterns.  See
-Info node `(elisp)Parsing' for how to write a query pattern in either
+PATTERN is either a string pattern, or a sexp patterns.  See Info node
+`(elisp)Pattern Matching' for how to write a query pattern in either
 string or s-expression form.
 
 BEG and END, if _both_ non-nil, specifies the range in which the query
 is executed.
 
-Raise an tree-sitter-query-error if PATTERN is malformed.  See the
-info node for how to read the error message.  */)
+Raise an tree-sitter-query-error if PATTERN is malformed.  */)
   (Lisp_Object node, Lisp_Object pattern,
    Lisp_Object beg, Lisp_Object end)
 {
@@ -1339,5 +1339,7 @@ the library.  */);
   defsubr (&Stree_sitter_node_descendant_for_range);
   defsubr (&Stree_sitter_node_eq);
 
+  defsubr (&Stree_sitter_expand_pattern_1);
+  defsubr (&Stree_sitter_expand_pattern);
   defsubr (&Stree_sitter_query_capture);
 }
