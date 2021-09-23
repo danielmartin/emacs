@@ -22,6 +22,7 @@
 ;;; Code:
 
 (eval-when-compile (require 'cl-lib))
+(require 'cl-seq)
 
 ;;; Activating tree-sitter
 
@@ -810,9 +811,11 @@ uses the first parser in `tree-sitter-parser-list'."
 
 ;;; Tree-sitter devel
 
+(declare-function find-library-name "find-func.el")
 (defun tree-sitter--check-manual-covarage ()
   "Print tree-sitter functions missing from the manual in message buffer."
   (interactive)
+  (require 'find-func)
   (let ((functions-in-source
          (with-temp-buffer
            (insert-file-contents (find-library-name "tree-sitter"))

@@ -749,28 +749,16 @@ The result of querying that pattern would be
 @end group
 @end example
 
-A query can have multiple patterns. In other words, @var{pattern}
-could be
+A query can have multiple patterns. For example, @var{pattern} can
+have two top-level patterns:
 
 @example
 @group
 (setq pattern
       "(binary_expression) @@biexp
-        (number_literal)  @@number @@biexp")
+       (number_literal)  @@number @@biexp")
 @end group
 @end example
-
-@c @noindent
-@c Then the result would be
-
-@c @example
-@c @group
-@c (tree-sitter-query-capture node pattern)
-@c     @result{} ((biexp . @var{<node for "1 + 2">})
-@c        (number . @var{<node for "1">})
-@c        (number . @var{<node for "2">}))
-@c @end group
-@c @end example
 
 @defun tree-sitter-query-string pattern string language
 This function parses @var{string} with @var{language}, pattern matches
@@ -901,13 +889,44 @@ nodes.
 
 @subheading Predicate
 
-As for now, Emacs does not support predicates in query patterns.
+We can add predicate constraints to a pattern.  For example, if we use
+the following query pattern
+
+@example
+@group
+(
+ (array . (_) @@first (_) @@last .)
+ (#equal @@first @@last)
+)
+@end group
+@end example
+
+tree-sitter only matches arrays where the first element equals to the
+last element, and only captures and returns the first and last
+elements in such arrays.  To attach a predicate to a pattern, we need
+to group then together.  A predicate always starts with a @samp{#}.
+Currently there are two predicates, @code{#equal} and @code{#match}.
+
+@deffn Predicate equal arg1 arg2
+Matches if @var{arg1} equals to @var{arg2}.  Arguments can be either a
+string or a capture name.  Capture names represent the text that the
+captured node spans in the buffer.
+@end deffn
+
+@deffn Predicate match regexp capture-name
+Matches if the text that @var{capture-name}’s node spans in the buffer
+matches regular expression @var{regexp}.  Matching is case-sensitive.
+@end deffn
+
+Note that a predicate can only refer to capture names that appeared in
+the same pattern.  Indeed, it makes little sense to refer to other
+patterns’ capture name anyway.
 
 @heading S-expression patterns
 
 Besides pattern strings, Emacs provides a s-expression based
 syntax. It largely resembles the official string-based syntax.  For
-example, instead of using a pattern string as in
+example, the following pattern
 
 @example
 @group
@@ -916,49 +935,64 @@ example, instead of using a pattern string as in
         left: (_) @@left
         \"+\" @@plus-sign
         right: (_) @@right) @@addition
+
         [\"return\" \"break\"] @@keyword")
 @end group
 @end example
 
 @noindent
-we can use a list of s-expressions:
+is equivalent to
 
 @example
 @group
 (tree-sitter-query-capture
  node '((addition_expression
          left: (_) @@left
-         \"+\" @@plus-sign
+         "+" @@plus-sign
          right: (_) @@right) @@addition
+
          ["return" "break"] @@keyword))
 @end group
 @end example
 
 Most pattern syntax can be written directly as strange but
-never-the-less valid s-expressions.  Only a few of them needs to be
-modified:
+never-the-less valid s-expressions.  Only a few of them needs
+modification:
 
 @itemize
 @item
 Anchor @samp{.} is written as @code{:anchor}.
 @item
-@samp{?} is written as @code{:?}.
+@samp{?} is written as @samp{:?}.
 @item
-@samp{*} is written as @code{:*}.
+@samp{*} is written as @samp{:*}.
 @item
-@samp{+} is written as @code{:+}.
+@samp{+} is written as @samp{:+}.
+@item
+@code{#equal} is written as @code{:equal}.  In general, predicates
+change their @samp{#} to @samp{:}.
 @end itemize
 
 For example,
 
 @example
-"(compound_expression . (_) @@first (_)* @@rest)"
+@group
+"(
+  (compound_expression . (_) @@first (_)* @@rest)
+  (#match \"love\" @@first)
+  )"
+@end group
 @end example
 
 is written in s-expression as
 
 @example
-'((compound_expression :anchor (_) @@first (_) :* @@rest))
+@group
+'((
+   (compound_expression :anchor (_) @@first (_) :* @@rest)
+   (:match "love" @@first)
+   ))
+@end group
 @end example
 
 Tree-sitter project's documentation about pattern-matching can be

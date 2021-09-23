@@ -57,10 +57,10 @@ struct Lisp_TS_Parser
 struct Lisp_TS_Node
 {
   union vectorlike_header header;
-  /* This should prevent the gc from collecting the parser before the
-     node is done with it.  TSNode contains a pointer to the tree it
-     belongs to, and the parser object, when collected by gc, will
-     free that tree. */
+  /* This prevents gc from collecting the tree before the node is done
+     with it.  TSNode contains a pointer to the tree it belongs to,
+     and the parser object, when collected by gc, will free that
+     tree. */
   Lisp_Object parser;
   TSNode node;
 };

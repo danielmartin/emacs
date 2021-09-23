@@ -88,8 +88,8 @@ bool
 ts_find_override_name
 (Lisp_Object language_symbol, Lisp_Object *name, Lisp_Object *c_symbol)
 {
-  Lisp_Object list = Vtree_sitter_load_name_override_list;
-  while (!NILP (list))
+  for (Lisp_Object list = Vtree_sitter_load_name_override_list;
+       !NILP (list); list = XCDR (list))
     {
       Lisp_Object lang = XCAR (XCAR (list));
       CHECK_SYMBOL (lang);
@@ -101,7 +101,6 @@ ts_find_override_name
 	  CHECK_STRING (*c_symbol);
 	  return true;
 	}
-      list = XCDR (list);
     }
   return false;
 }
@@ -137,14 +136,14 @@ ts_load_language (Lisp_Object language_symbol, bool signal)
       c_name = SSDATA (override_c_name);
     }
 
-  Lisp_Object suffixes = Vdynamic_library_suffixes;
   dynlib_handle_ptr handle;
   char const *error;
   Lisp_Object error_list = Qnil;
   /* Try loading dynamic library with each extension in
      'tree-sitter-load-suffixes'.  Stop when succeed, record error
      message and try the next one when fail.  */
-  while (!NILP (suffixes))
+  for (Lisp_Object suffixes = Vdynamic_library_suffixes;
+       !NILP (suffixes); suffixes = XCDR (suffixes))
     {
       char *library_name =
 	SSDATA (concat2 (lib_base_name, XCAR (suffixes)));
@@ -155,13 +154,12 @@ ts_load_language (Lisp_Object language_symbol, bool signal)
 	break;
       else
 	error_list = Fcons (build_string (error), error_list);
-      suffixes = XCDR (suffixes);
     }
   if (error != NULL)
     {
       if (signal)
 	xsignal2 (Qtree_sitter_load_language_error,
-		  symbol_name, Freverse (error_list));
+		  symbol_name, Fnreverse (error_list));
       else
 	return NULL;
     }
@@ -231,9 +229,10 @@ void
 ts_record_change (ptrdiff_t start_byte, ptrdiff_t old_end_byte,
 		  ptrdiff_t new_end_byte)
 {
-  Lisp_Object parser_list = Fsymbol_value (Qtree_sitter_parser_list);
-
-  while (!NILP (parser_list))
+  for (Lisp_Object parser_list = Fsymbol_value
+	 (Qtree_sitter_parser_list);
+       !NILP (parser_list);
+       parser_list = XCDR (parser_list))
     {
       Lisp_Object lisp_parser = XCAR (parser_list);
       TSTree *tree = XTS_PARSER (lisp_parser)->tree;
@@ -263,7 +262,6 @@ ts_record_change (ptrdiff_t start_byte, ptrdiff_t old_end_byte,
 	  XTS_PARSER (lisp_parser)->visible_end = affected_new_end;
 	  XTS_PARSER (lisp_parser)->need_reparse = true;
 	}
-      parser_list = XCDR (parser_list);
     }
 }
 
@@ -425,7 +423,7 @@ make_ts_parser (Lisp_Object buffer, TSParser *parser,
 {
   struct Lisp_TS_Parser *lisp_parser
     = ALLOCATE_PSEUDOVECTOR
-    (struct Lisp_TS_Parser, parser, PVEC_TS_PARSER);
+    (struct Lisp_TS_Parser, buffer, PVEC_TS_PARSER);
 
   lisp_parser->language_symbol = language_symbol;
   lisp_parser->buffer = buffer;
@@ -561,21 +559,22 @@ void
 ts_check_range_argument (Lisp_Object ranges)
 {
   EMACS_INT last_point = 1;
-  while (!NILP (ranges))
+  for (Lisp_Object tail = ranges;
+	 !NILP (tail); tail = XCDR (ranges))
     {
-      Lisp_Object range = XCAR (ranges);
-      CHECK_FIXNUM (XCAR (range));
-      CHECK_FIXNUM (XCDR (range));
-      EMACS_INT beg = XFIXNUM (XCAR (range));
-      EMACS_INT end = XFIXNUM (XCDR (range));
+      Lisp_Object range = XCAR (tail);
+      CHECK_FIXNUM (XCAR (tail));
+      CHECK_FIXNUM (XCDR (tail));
+      EMACS_INT beg = XFIXNUM (XCAR (tail));
+      EMACS_INT end = XFIXNUM (XCDR (tail));
       /* TODO: Maybe we should check for point-min/max, too?  */
       if (!(last_point <= beg && beg <= end))
 	xsignal2 (Qtree_sitter_set_range_error,
 		  build_pure_c_string
 		  ("RANGE is either overlapping or out-of-order"),
-		  range);
+		  tail);
       last_point = end;
-      ranges = XCDR (ranges);
+
     }
 }
 
@@ -676,7 +675,7 @@ nil.  */)
 	       make_fixnum (buf_bytepos_to_charpos (buffer, end_byte)));
       list = Fcons (lisp_range, list);
     }
-  return Freverse (list);
+  return Fnreverse (list);
 }
 
 /*** Node API  */
@@ -1072,6 +1071,8 @@ PATTERN can be
     :?
     :*
     :+
+    :equal
+    :match
     (TYPE PATTERN...)
     [PATTERN...]
     FIELD-NAME:
@@ -1092,6 +1093,10 @@ explanation.  */)
     return build_pure_c_string("*");
   if (EQ (pattern, intern_c_string (":+")))
     return build_pure_c_string("+");
+  if (EQ (pattern, intern_c_string (":equal")))
+    return build_pure_c_string("#equal");
+  if (EQ (pattern, intern_c_string (":match")))
+    return build_pure_c_string("#match");
   Lisp_Object opening_delimeter =
     build_pure_c_string (VECTORP (pattern) ? "[" : "(");
   Lisp_Object closing_delimiter =
@@ -1117,6 +1122,8 @@ A PATTERN in PATTERN-LIST can be
     :?
     :*
     :+
+    :equal
+    :match
     (TYPE PATTERN...)
     [PATTERN...]
     FIELD-NAME:
@@ -1153,6 +1160,166 @@ ts_query_error_to_string (TSQueryError error)
     }
 }
 
+/* Collect predicates for this match and return them in a list.  Each
+   predicate is a list of strings and symbols.  */
+Lisp_Object
+ts_predicates_for_pattern
+(TSQuery *query, uint32_t pattern_index)
+{
+  uint32_t len;
+  const TSQueryPredicateStep *predicate_list =
+    ts_query_predicates_for_pattern (query, pattern_index, &len);
+  Lisp_Object result = Qnil;
+  Lisp_Object predicate = Qnil;
+  for (int idx=0; idx < len; idx++)
+    {
+      TSQueryPredicateStep step = predicate_list[idx];
+      switch (step.type)
+	{
+	case TSQueryPredicateStepTypeCapture:
+	  {
+	    uint32_t str_len;
+	    const char *str = ts_query_capture_name_for_id
+	      (query, step.value_id, &str_len);
+	    predicate = Fcons (intern_c_string_1 (str, str_len),
+			       predicate);
+	    break;
+	  }
+	case TSQueryPredicateStepTypeString:
+	  {
+	    uint32_t str_len;
+	    const char *str = ts_query_string_value_for_id
+	      (query, step.value_id, &str_len);
+	    predicate = Fcons (make_string (str, str_len), predicate);
+	    break;
+	  }
+	case TSQueryPredicateStepTypeDone:
+	  result = Fcons (Fnreverse (predicate), result);
+	  predicate = Qnil;
+	  break;
+	}
+    }
+  return Fnreverse (result);
+}
+
+/* Translate a capture NAME (symbol) to the text of the captured node.
+   Signals tree-sitter-query-error if such node is not captured.  */
+Lisp_Object
+ts_predicate_capture_name_to_text (Lisp_Object name, Lisp_Object captures)
+{
+  Lisp_Object node = Qnil;
+  for (Lisp_Object tail = captures; !NILP (tail); tail = XCDR (tail))
+    {
+      if (EQ (XCAR (XCAR (tail)), name))
+	{
+	  node = XCDR (XCAR (tail));
+	  break;
+	}
+    }
+
+  if (NILP (node))
+    xsignal3 (Qtree_sitter_query_error,
+	      build_pure_c_string ("Cannot find captured node"),
+	      name, build_pure_c_string ("A predicate can only refer to captured nodes in the same pattern"));
+
+  struct buffer *old_buffer = current_buffer;
+  set_buffer_internal
+    (XBUFFER (XTS_PARSER (XTS_NODE (node)->parser)->buffer));
+  Lisp_Object text = Fbuffer_substring
+    (Ftree_sitter_node_start (node), Ftree_sitter_node_end (node));
+  set_buffer_internal (old_buffer);
+  return text;
+}
+
+/* Handles predicate (#equal A B).  Return true if A equals B; return
+   false otherwise. A and B can be either string, or a capture name.
+   The capture name evaluates to the text its captured node spans in
+   the buffer.  */
+bool
+ts_predicate_equal (Lisp_Object args, Lisp_Object captures)
+{
+  if (XFIXNUM (Flength (args)) != 2)
+    xsignal2 (Qtree_sitter_query_error, build_pure_c_string ("Predicate `equal' requires two arguments but only given"), Flength (args));
+
+  Lisp_Object arg1 = XCAR (args);
+  Lisp_Object arg2 = XCAR (XCDR (args));
+  Lisp_Object tail = captures;
+  Lisp_Object text1 = STRINGP (arg1) ? arg1 :
+    ts_predicate_capture_name_to_text (arg1, captures);
+  Lisp_Object text2 = STRINGP (arg2) ? arg2 :
+    ts_predicate_capture_name_to_text (arg2, captures);
+
+  if (NILP (Fstring_equal (text1, text2)))
+    return false;
+  else
+    return true;
+}
+
+/* Handles predicate (#match "regexp" @node).  Return true if "regexp"
+   matches the text spanned by @node; return false otherwise.  Matching
+   is case-sensitive.  */
+bool
+ts_predicate_match (Lisp_Object args, Lisp_Object captures)
+{
+  if (XFIXNUM (Flength (args)) != 2)
+    xsignal2 (Qtree_sitter_query_error, build_pure_c_string ("Predicate `equal' requires two arguments but only given"), Flength (args));
+
+  Lisp_Object regexp = XCAR (args);
+  Lisp_Object capture_name = XCAR (XCDR (args));
+  Lisp_Object tail = captures;
+  Lisp_Object text = ts_predicate_capture_name_to_text
+    (capture_name, captures);
+
+  /* It's probably common to get the argument order backwards.  Catch
+     this mistake early and show helpful explanation, because Emacs
+     loves you.  (We put the regexp first because that's what
+     string-match does.)  */
+  if (!STRINGP (regexp))
+    xsignal1 (Qtree_sitter_query_error, build_pure_c_string ("The first argument to `match' should be a regexp string, not a capture name"));
+  if (!SYMBOLP (capture_name))
+    xsignal1 (Qtree_sitter_query_error, build_pure_c_string ("The second argument to `match' should be a capture name, not a string"));
+
+  if (fast_string_match (regexp, text) >= 0)
+    return true;
+  else
+    return false;
+}
+
+/* About predicates: I decide to hard-code predicates in C instead of
+   implementing an extensible system where predicates are translated
+   to Lisp functions, and new predicates can be added by extending a
+   list of functions, because I really couldn't imagine any useful
+   predicates besides equal and match.  If we later found out that
+   such system is indeed useful and necessary, it can be easily
+   added.  */
+
+/* If all predicates in PREDICATES passes, return true; otherwise
+   return false.  */
+bool
+ts_eval_predicates (Lisp_Object captures, Lisp_Object predicates)
+{
+  bool pass = true;
+  /* Evaluate each predicates.  */
+  for (Lisp_Object tail = predicates;
+       !NILP (tail); tail = XCDR (tail))
+    {
+      Lisp_Object predicate = XCAR (tail);
+      Lisp_Object fn = XCAR (predicate);
+      Lisp_Object args = XCDR (predicate);
+      if (!NILP (Fstring_equal (fn, build_pure_c_string("equal"))))
+	pass = ts_predicate_equal (args, captures);
+      else if (!NILP (Fstring_equal
+		      (fn, build_pure_c_string("match"))))
+	pass = ts_predicate_match (args, captures);
+      else
+	xsignal3 (Qtree_sitter_query_error,
+		  build_pure_c_string ("Invalid predicate"),
+		  fn, build_pure_c_string ("Currently Emacs only supports equal and match predicate"));
+    }
+  /* If all predicates passed, add captures to result list.  */
+  return pass;
+}
+
 DEFUN ("tree-sitter-query-capture",
        Ftree_sitter_query_capture,
        Stree_sitter_query_capture, 2, 4, 0,
@@ -1183,6 +1350,7 @@ Raise an tree-sitter-query-error if PATTERN is malformed.  */)
   else
     CHECK_STRING (pattern);
 
+  /* Extract C values from Lisp objects.  */
   TSNode ts_node = XTS_NODE (node)->node;
   Lisp_Object lisp_parser = XTS_NODE (node)->parser;
   ptrdiff_t visible_beg =
@@ -1191,7 +1359,7 @@ Raise an tree-sitter-query-error if PATTERN is malformed.  */)
     (XTS_PARSER (lisp_parser)->parser);
   char *source = SSDATA (pattern);
 
-
+  /* Initialize query objects, and execute query.  */
   uint32_t error_offset;
   TSQueryError error_type;
   TSQuery *query = ts_query_new (lang, source, strlen (source),
@@ -1216,30 +1384,41 @@ Raise an tree-sitter-query-error if PATTERN is malformed.  */)
   ts_query_cursor_exec (cursor, query, ts_node);
   TSQueryMatch match;
 
+  /* Go over each match, collect captures and predicates.  Include the
+     captures in the return list if all predicates in that match
+     passes.  */
   Lisp_Object result = Qnil;
   while (ts_query_cursor_next_match (cursor, &match))
     {
+      /* Get captured nodes.  */
+      Lisp_Object captures_lisp = Qnil;
       const TSQueryCapture *captures = match.captures;
       for (int idx=0; idx < match.capture_count; idx++)
 	{
-	  TSQueryCapture capture;
-	  Lisp_Object captured_node;
-	  const char *capture_name;
-	  Lisp_Object entry;
 	  uint32_t capture_name_len;
-
-	  capture = captures[idx];
-	  captured_node = make_ts_node(lisp_parser, capture.node);
-	  capture_name = ts_query_capture_name_for_id
+	  TSQueryCapture capture = captures[idx];
+	  Lisp_Object captured_node =
+	    make_ts_node(lisp_parser, capture.node);
+	  const char *capture_name = ts_query_capture_name_for_id
 	    (query, capture.index, &capture_name_len);
-	  entry = Fcons (intern_c_string (capture_name),
-			 captured_node);
-	  result = Fcons (entry, result);
+	  Lisp_Object cap =
+	    Fcons (intern_c_string_1 (capture_name, capture_name_len),
+		   captured_node);
+	  captures_lisp = Fcons (cap, captures_lisp);
+	}
+      /* Get predicates.  */
+      Lisp_Object predicates =
+	ts_predicates_for_pattern (query, match.pattern_index);
+
+      captures_lisp = Fnreverse (captures_lisp);
+      if (ts_eval_predicates (captures_lisp, predicates))
+	{
+	  result = CALLN (Fnconc, result, captures_lisp);
 	}
     }
   ts_query_delete (query);
   ts_query_cursor_delete (cursor);
-  return Freverse (result);
+  return result;
 }
 
 /*** Initialization */

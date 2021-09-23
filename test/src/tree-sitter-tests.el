@@ -274,6 +274,7 @@
 ;; - tree-sitter-node-eq
 ;; - tree-sitter-node-text
 ;; - tree-sitter-load-name-list
+;; - predicates
 
 (provide 'tree-sitter-tests)
 ;;; tree-sitter-tests.el ends here
