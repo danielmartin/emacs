@@ -560,21 +560,20 @@ ts_check_range_argument (Lisp_Object ranges)
 {
   EMACS_INT last_point = 1;
   for (Lisp_Object tail = ranges;
-	 !NILP (tail); tail = XCDR (ranges))
+       !NILP (tail); tail = XCDR (tail))
     {
       Lisp_Object range = XCAR (tail);
-      CHECK_FIXNUM (XCAR (tail));
-      CHECK_FIXNUM (XCDR (tail));
-      EMACS_INT beg = XFIXNUM (XCAR (tail));
-      EMACS_INT end = XFIXNUM (XCDR (tail));
+      CHECK_FIXNUM (XCAR (range));
+      CHECK_FIXNUM (XCDR (range));
+      EMACS_INT beg = XFIXNUM (XCAR (range));
+      EMACS_INT end = XFIXNUM (XCDR (range));
       /* TODO: Maybe we should check for point-min/max, too?  */
       if (!(last_point <= beg && beg <= end))
 	xsignal2 (Qtree_sitter_set_range_error,
 		  build_pure_c_string
 		  ("RANGE is either overlapping or out-of-order"),
-		  tail);
+		  ranges);
       last_point = end;
-
     }
 }
 
@@ -633,6 +632,9 @@ is nil, set PARSER to parse the whole buffer.  */)
 	}
       success = ts_parser_set_included_ranges
 	(XTS_PARSER (parser)->parser, ts_ranges, (uint32_t) len);
+      /* Although XFIXNUM could signal, it should be impossible
+	 because we have checked the input by ts_check_range_argument.
+	 So there is no need for unwind-protect.  */
       free (ts_ranges);
     }
 
@@ -1146,17 +1148,17 @@ ts_query_error_to_string (TSQueryError error)
   switch (error)
     {
     case TSQueryErrorNone:
-      return "none";
+      return "None";
     case TSQueryErrorSyntax:
-      return "syntax";
+      return "Syntax error at";
     case TSQueryErrorNodeType:
-      return "node type";
+      return "Node type error at";
     case TSQueryErrorField:
-      return "field";
+      return "Field error at";
     case TSQueryErrorCapture:
-      return "capture";
+      return "Capture error at";
     case TSQueryErrorStructure:
-      return "structure";
+      return "Structure error at";
     }
 }
 
@@ -1323,20 +1325,21 @@ ts_eval_predicates (Lisp_Object captures, Lisp_Object predicates)
 DEFUN ("tree-sitter-query-capture",
        Ftree_sitter_query_capture,
        Stree_sitter_query_capture, 2, 4, 0,
-       doc: /* Query NODE with PATTERN.
+       doc: /* Query NODE with patterns in QUERY.
 
-Returns a list of (CAPTURE_NAME . NODE).  CAPTURE_NAME is the name
+Return a list of (CAPTURE_NAME . NODE).  CAPTURE_NAME is the name
 assigned to the node in PATTERN.  NODE is the captured node.
 
-PATTERN is either a string pattern, or a sexp patterns.  See Info node
-`(elisp)Pattern Matching' for how to write a query pattern in either
-string or s-expression form.
+QUERY is either a string query or a sexp query.  See Info node
+`(elisp)Pattern Matching' for how to write a query in either string or
+s-expression form.
 
-BEG and END, if _both_ non-nil, specifies the range in which the query
+BEG and END, if both non-nil, specifies the range in which the query
 is executed.
 
-Raise an tree-sitter-query-error if PATTERN is malformed.  */)
-  (Lisp_Object node, Lisp_Object pattern,
+Raise an tree-sitter-query-error if QUERY is malformed, or something
+else goes wrong.  */)
+  (Lisp_Object node, Lisp_Object query,
    Lisp_Object beg, Lisp_Object end)
 {
   CHECK_TS_NODE (node);
@@ -1345,10 +1348,10 @@ Raise an tree-sitter-query-error if PATTERN is malformed.  */)
   if (!NILP (end))
     CHECK_INTEGER (end);
 
-  if (CONSP (pattern))
-    pattern = Ftree_sitter_expand_pattern (pattern);
+  if (CONSP (query))
+    query = Ftree_sitter_expand_pattern (query);
   else
-    CHECK_STRING (pattern);
+    CHECK_STRING (query);
 
   /* Extract C values from Lisp objects.  */
   TSNode ts_node = XTS_NODE (node)->node;
@@ -1357,20 +1360,20 @@ Raise an tree-sitter-query-error if PATTERN is malformed.  */)
     XTS_PARSER (XTS_NODE (node)->parser)->visible_beg;
   const TSLanguage *lang = ts_parser_language
     (XTS_PARSER (lisp_parser)->parser);
-  char *source = SSDATA (pattern);
+  char *source = SSDATA (query);
 
   /* Initialize query objects, and execute query.  */
   uint32_t error_offset;
   TSQueryError error_type;
-  TSQuery *query = ts_query_new (lang, source, strlen (source),
+  TSQuery *ts_query = ts_query_new (lang, source, strlen (source),
 				 &error_offset, &error_type);
   TSQueryCursor *cursor = ts_query_cursor_new ();
 
-  if (query == NULL)
+  if (ts_query == NULL)
     {
       xsignal2 (Qtree_sitter_query_error,
-		make_fixnum (error_offset),
-		build_string (ts_query_error_to_string (error_type)));
+		build_string (ts_query_error_to_string (error_type)),
+		make_fixnum (error_offset));
     }
   if (!NILP (beg) && !NILP (end))
     {
@@ -1381,7 +1384,7 @@ Raise an tree-sitter-query-error if PATTERN is malformed.  */)
 	 (uint32_t) end_byte - visible_beg);
     }
 
-  ts_query_cursor_exec (cursor, query, ts_node);
+  ts_query_cursor_exec (cursor, ts_query, ts_node);
   TSQueryMatch match;
 
   /* Go over each match, collect captures and predicates.  Include the
@@ -1400,7 +1403,7 @@ Raise an tree-sitter-query-error if PATTERN is malformed.  */)
 	  Lisp_Object captured_node =
 	    make_ts_node(lisp_parser, capture.node);
 	  const char *capture_name = ts_query_capture_name_for_id
-	    (query, capture.index, &capture_name_len);
+	    (ts_query, capture.index, &capture_name_len);
 	  Lisp_Object cap =
 	    Fcons (intern_c_string_1 (capture_name, capture_name_len),
 		   captured_node);
@@ -1408,7 +1411,7 @@ Raise an tree-sitter-query-error if PATTERN is malformed.  */)
 	}
       /* Get predicates.  */
       Lisp_Object predicates =
-	ts_predicates_for_pattern (query, match.pattern_index);
+	ts_predicates_for_pattern (ts_query, match.pattern_index);
 
       captures_lisp = Fnreverse (captures_lisp);
       if (ts_eval_predicates (captures_lisp, predicates))
@@ -1416,7 +1419,7 @@ Raise an tree-sitter-query-error if PATTERN is malformed.  */)
 	  result = CALLN (Fnconc, result, captures_lisp);
 	}
     }
-  ts_query_delete (query);
+  ts_query_delete (ts_query);
   ts_query_cursor_delete (cursor);
   return result;
 }

@@ -18,11 +18,15 @@
 ;; along with GNU Emacs.  If not, see <https://www.gnu.org/licenses/>.
 
 ;;; Commentary:
+;;
+;; Note to self: we don't create parsers automatically in any provided
+;; functions.
 
 ;;; Code:
 
 (eval-when-compile (require 'cl-lib))
 (require 'cl-seq)
+(require 'font-lock)
 
 ;;; Activating tree-sitter
 
@@ -121,7 +125,7 @@ NAMED non-nil, only look for named node.  NAMED defaults to nil.
 If PARSER-OR-LANG is nil, use the first parser in
 `tree-sitter-parser-list'; if PARSER-OR-LANG is a parser, use
 that parser; if PARSER-OR-LANG is a language, find a parser using
-that language (symbol) and use that."
+that language in the current buffer, and use that."
   (when-let ((root (if (tree-sitter-parser-p parser-or-lang)
                        (tree-sitter-parser-root-node parser-or-lang)
                      (tree-sitter-buffer-root-node parser-or-lang))))
@@ -199,49 +203,49 @@ If NAMED is non-nil, count named child only."
 
 ;;; Query API suuplement
 
-(defun tree-sitter-query-buffer (source pattern &optional beg end)
-  "Query the current buffer with PATTERN.
+(defun tree-sitter-query-in (source query &optional beg end)
+  "Query the current buffer with QUERY.
 
 SOURCE can be a language symbol, a parser, or a node.  If a
-language symbol, use the root node of the first parser using that
+language symbol, use the root node of the first parser for that
 language; if a parser, use the root node of that parser; if a
 node, use that node.
 
-PATTERN is either a string pattern, or a sexp patterns.  See Info node
+QUERY is either a string query or a sexp query.  See Info node
 `(elisp)Pattern Matching' for how to write a query pattern in either
 string or s-expression form.
 
 BEG and END, if _both_ non-nil, specifies the range in which the query
 is executed.
 
-Raise an tree-sitter-query-error if PATTERN is malformed."
+Raise an tree-sitter-query-error if QUERY is malformed."
   (tree-sitter-query-capture
    (cond ((symbolp source) (tree-sitter-buffer-root-node source))
          ((tree-sitter-parser-p source)
           (tree-sitter-parser-root-node source))
          ((tree-sitter-node-p source) source))
-   pattern
+   query
    beg end))
 
-(defun tree-sitter-query-string (string pattern language)
-  "Query STRING with PATTERN in LANGUAGE.
-See `tree-sitter-query-capture' for PATTERN."
+(defun tree-sitter-query-string (string query language)
+  "Query STRING with QUERY in LANGUAGE.
+See `tree-sitter-query-capture' for QUERY."
   (with-temp-buffer
     (insert string)
     (let ((parser (tree-sitter-parser-create (current-buffer) language)))
       (tree-sitter-query-capture
        (tree-sitter-parser-root-node parser)
-       pattern))))
+       query))))
 
-(defun tree-sitter-query-range (source pattern &optional beg end)
+(defun tree-sitter-query-range (source query &optional beg end)
   "Query the current buffer and return ranges of captured nodes.
 
-PATTERN, SOURCE, BEG, END are the same as in
-`tree-sitter-query-capture'.  This function returns a list
+QUERY, SOURCE, BEG, END are the same as in
+`tree-sitter-query-in'.  This function returns a list
 of (START . END), where START and END specifics the range of each
 captured node.  Capture names don't matter."
   (cl-loop for capture
-           in (tree-sitter-query-buffer source pattern beg end)
+           in (tree-sitter-query-in source query beg end)
            for node = (cdr capture)
            collect (cons (tree-sitter-node-start node)
                          (tree-sitter-node-end node))))
@@ -277,6 +281,100 @@ If only need to update the ranges in a region, pass the START and
 END of that region."
   (pcase-dolist (`(,_lang . ,function) tree-sitter-range-functions)
     (funcall function (or start (point-min)) (or end (point-max)))))
+
+;;; Font-lock
+
+(defvar-local tree-sitter-font-lock-settings nil
+  "A list of SETTINGs for tree-sitter-based fontification.
+
+Each SETTING should look like
+
+    (LANGUAGE PATTERN)
+
+Each SETTING controls one parser (often of different languages).
+LANGUAGE is the language symbol.  See Info node `(elisp)Language
+Definitions'.
+
+PATTERN is either a string pattern or a sexp pattern.
+See Info node `(elisp)Pattern Matching' for writing query
+pattern.
+
+Generally, major-modes should set
+`tree-sitter-font-lock-defaults', and let Emacs automatically
+populate this variable.")
+
+(defvar-local tree-sitter-font-lock-defaults nil
+  "Defaults for tree-sitter Font Lock specified by the major mode.
+
+This variable should be a list
+
+    (DEFAULT :KEYWORD VALUE...)
+
+A DEFAULT may be a symbol (a variable or function whose value is
+the settings to use for fontification) or a list of
+symbols (specifying different levels of fontification).  If the
+symbol is both a variable and a function, it is used as a
+function.  Different levels of fontification can be controlled by
+`font-lock-maximum-decoration'.
+
+The symbol DEFAULT (or each symbol in DEFAULT) should contain or
+return a SETTING as explained in
+`tree-sitter-font-lock-settings'.  Basically,
+
+    (LANGUAGE PATTERN)
+
+KEYWORD and VALUE are additional settings can could be used to
+alter fontification behavior.  Currently there aren't any.
+
+For multi-language major-modes, you should provide range functions
+in `tree-sitter-range-functions', and Emacs will set the ranges
+before fontifing a region.  See Info node `(elisp)Multiple
+Languages' for what does it mean to set ranges for a parser.")
+
+(defun tree-sitter-font-lock-fontify-region (start end &optional loudly)
+  "Fontify the region between START and END.
+If LOUDLY is non-nil, message some debugging information."
+  (funcall #'font-lock-default-fontify-region start end loudly)
+  (tree-sitter-update-ranges start end)
+  (dolist (setting font-lock-tree-sitter-settings)
+    (when-let* ((language (nth 0 setting))
+                (match-pattern (nth 1 setting))
+                (parser (tree-sitter-get-parser-create language)))
+      (when-let ((node (tree-sitter-node-at start end parser)))
+        (let ((captures (tree-sitter-query-capture
+                         node match-pattern
+                         ;; Specifying the range is important. More
+                         ;; often than not, NODE will be the root
+                         ;; node, and if we don't specify the range,
+                         ;; we are basically querying the whole file.
+                         start end)))
+          (with-silent-modifications
+            (dolist (capture captures)
+              (let* ((face (car capture))
+                     (node (cdr capture))
+                     (start (tree-sitter-node-start node))
+                     (end (tree-sitter-node-end node)))
+                (cond ((facep face)
+                       (put-text-property start end 'face face))
+                      ((functionp face)
+                       (funcall face start end node)))
+                (if loudly
+                    (message
+                     "Fontifying text from %d to %d Face: %s Language: %s"
+                     start end face language))))))))))
+
+(defun tree-sitter-enable-font-lock ()
+  "Enable tree-sitter font-locking for the current buffer."
+  (setq-local tree-sitter-font-lock-settings
+              (mapcar (lambda (elm) ; = (DEFAULT :setting ...)
+                        (font-lock-eval-keywords
+                         (font-lock-choose-keywords
+                          (nth 0 elm) ; = DEFAULT
+	                  (font-lock-value-in-major-mode
+                           font-lock-maximum-decoration))))
+                      tree-sitter-font-lock-defaults))
+  (setq-local font-lock-fontify-region-function
+              #'tree-sitter-font-lock-fontify-region))
 
 ;;; Indent
 

@@ -694,83 +694,81 @@ name @code{biexp}:
 
 Now we can introduce the query functions.
 
-@defun tree-sitter-query-buffer source pattern &optional beg end
-This function matches @var{pattern} in the current
-buffer. @var{pattern} can be a either string or an s-expression.
-Right now, we focus on the string syntax, s-expression syntax is
-described at the end of the section.
+@defun tree-sitter-query-capture node query beg end
+This function matches patterns in @var{query} in @var{node}.
+Argument @var{query} can be a either string or a s-expression.  For
+now, we focus on the string syntax; s-expression syntax is described
+at the end of the section.
 
-It returns all captured nodes in a list of @code{(@var{capture_name}
+The function returns all captured nodes in a list of
+@code{(@var{capture_name} . @var{node})}.  If @var{beg} and @var{end}
+are both non-nil, it only pattern matches nodes in that range.
+
+@vindex tree-sitter-query-error
+This function raise a @var{tree-sitter-query-error} if @var{query} is
+malformed.  The signal data contains a description of the specific
+error.
+@end defun
+
+@defun tree-sitter-query-in source query &optional beg end
+This function matches patterns in @var{query} in @var{source}, and
+returns all captured nodes in a list of @code{(@var{capture_name}
 . @var{node})}.  If @var{beg} and @var{end} are both non-nil, it only
 pattern match nodes in that range.
 
-For convenience, @var{source} can be a language symbol, a parser, or a
-node.  If a language symbol, this function matches in the root node of
-the first parser for that language; if a parser, this function matches
-in the root node of that parser; if a node, this function matches in
-that node.
-
-@vindex tree-sitter-query-error
-This function raise an @var{tree-sitter-query-error} if @var{pattern}
-is malformed.  The signal data looks like @code{(@var{type}
-@var{position})}, where @var{type} tells how is @var{pattern}
-malformed, and @var{position} tells the position of the problem.
-@end defun
-
-@defun tree-sitter-query-capture node pattern beg end
-This function matches @var{pattern} in @var{node}, and returns all
-captured nodes in a list of @code{(@var{capture_name} . @var{node})}.
-If @var{beg} and @var{end} are both non-nil, it only pattern match
-nodes in that range.
+Argument @var{source} designates a node, it can be a language symbol,
+a parser, or simply a node.  If a language symbol, @var{source}
+represents the root node of the first parser for that language in the
+current buffer; if a parser, @var{source} represents the root node of
+that parser.
 
 This function also raises @var{tree-sitter-query-error}.
 @end defun
 
 For example, suppose @var{node}'s content is @code{1 + 2}, and
-@var{pattern} is
+@var{query} is
 
 @example
 @group
-(setq pattern
+(setq query
       "(binary_expression
         (number_literal) @@number-in-exp) @@biexp")
 @end group
 @end example
 
 @noindent
-The result of querying that pattern would be
+Querying that query would return
 
 @example
 @group
-(tree-sitter-query-capture node pattern)
+(tree-sitter-query-capture node query)
     @result{} ((biexp . @var{<node for "1 + 2">})
        (number-in-exp . @var{<node for "1">})
        (number-in-exp . @var{<node for "2">}))
 @end group
 @end example
 
-A query can have multiple patterns. For example, @var{pattern} can
-have two top-level patterns:
+As we mentioned earlier, a @var{query} could contain multiple
+patterns. For example, it could have two top-level patterns:
 
 @example
 @group
-(setq pattern
+(setq query
       "(binary_expression) @@biexp
        (number_literal)  @@number @@biexp")
 @end group
 @end example
 
-@defun tree-sitter-query-string pattern string language
+@defun tree-sitter-query-string query string language
 This function parses @var{string} with @var{language}, pattern matches
-its root node with @var{pattern}, and returns the result.
+its root node with @var{query}, and returns the result.
 @end defun
 
 @heading More query syntax
 
 Besides node type and capture, tree-sitter's query syntax can express
 anonymous node, field name, wildcard, quantification, grouping,
-alternation, anchor, and predicate.  Predicate is currently not
-supported in Emacs.
+alternation, anchor, and predicate.
 
 @subheading Anonymous node
 
@@ -793,7 +791,7 @@ named child of a @code{binary_expression} node, the pattern would be
 
 @subheading Field name
 
-We can capture child nodes that has specific field names like so:
+We can capture child nodes that has specific field names:
 
 @example
 @group
@@ -813,11 +811,11 @@ We can also capture a node that doesn't have certain field, say, a
 @subheading Quantify node
 
 Tree-sitter recognizes quantification operators @samp{*}, @samp{+} and
-@samp{?}.  Their means are the same as in regular expressions:
-@samp{*} matches the preceding node zero or more times, @samp{+}
+@samp{?}.  Their meanings are the same as in regular expressions:
+@samp{*} matches the preceding pattern zero or more times, @samp{+}
 matches one or more times, and @samp{?} matches zero or one time.
 
-For example, this pattern matches @code{compound_expression} nodes
+For example, this pattern matches @code{type_declaration} nodes
 that has @emph{zero or more} @code{long} keyword.
 
 @example
@@ -836,7 +834,7 @@ And this pattern matches a type declaration that has zero or one
 
 Similar to groups in regular expression, we can bundle patterns into a
 group and apply quantification operators to it.  For example, to
-express a comma separated list of identifiers, one would write
+express a comma separated list of identifiers, one could write
 
 @example
 (identifier) ("," (identifier))*
@@ -901,10 +899,9 @@ the following query pattern
 @end group
 @end example
 
-tree-sitter only matches arrays where the first element equals to the
-last element, and only captures and returns the first and last
-elements in such arrays.  To attach a predicate to a pattern, we need
-to group then together.  A predicate always starts with a @samp{#}.
+Then tree-sitter only matches arrays where the first element equals to
+the last element.  To attach a predicate to a pattern, we need to
+group then together.  A predicate always starts with a @samp{#}.
 Currently there are two predicates, @code{#equal} and @code{#match}.
 
 @deffn Predicate equal arg1 arg2
@@ -918,15 +915,15 @@ Matches if the text that @var{capture-name}’s node spans in the buffer
 matches regular expression @var{regexp}.  Matching is case-sensitive.
 @end deffn
 
-Note that a predicate can only refer to capture names that appeared in
-the same pattern.  Indeed, it makes little sense to refer to other
-patterns’ capture name anyway.
+Note that a predicate can only refer to capture names appeared in the
+same pattern.  Indeed, it makes little sense to refer to capture names
+in other patterns anyway.
 
 @heading S-expression patterns
 
-Besides pattern strings, Emacs provides a s-expression based
-syntax. It largely resembles the official string-based syntax.  For
-example, the following pattern
+Besides strings, Emacs provides a s-expression based syntax for query
+patterns. It largely resembles the string-based syntax.  For example,
+the following pattern
 
 @example
 @group
