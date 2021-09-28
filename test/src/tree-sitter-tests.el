@@ -272,7 +272,6 @@
 ;; TODO
 ;; - Functions in tree-sitter.el
 ;; - tree-sitter-node-eq
-;; - tree-sitter-node-text
 ;; - tree-sitter-load-name-list
 ;; - predicates
 

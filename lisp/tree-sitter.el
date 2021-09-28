@@ -43,18 +43,24 @@
   "Maximum buffer size for enabling tree-sitter parsing."
   :type 'integer)
 
+(defun tree-sitter-available-p ()
+  "Return non-nil if tree-sitter features are available."
+  (boundp 'tree-sitter-parser-create))
+
 (defun tree-sitter-should-enable-p (&optional mode)
   "Return non-nil if MODE should activate tree-sitter support.
 MODE defaults to the value of `major-mode'.  The result depends
-on the value of `tree-sitter-disabled-modes' and
-`tree-sitter-maximum-size'."
+on the value of `tree-sitter-disabled-modes',
+`tree-sitter-maximum-size', and of course, whether tree-sitter is
+avaliable on the system at all."
   (let* ((mode (or mode major-mode))
          (disabled (cl-loop
                     for disabled-mode in tree-sitter-disabled-modes
                     if (provided-mode-derived-p mode disabled-mode)
                     return t
                     finally return nil)))
-    (and (not disabled)
+    (and (tree-sitter-avaliable-p)
+         (not disabled)
          (< (buffer-size) tree-sitter-maximum-size))))
 
 ;;; Parser API supplement

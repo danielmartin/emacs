@@ -1351,7 +1351,6 @@ Parsing Program Source
 * Accessing Node::           Accessing node information.
 * Pattern Matching::         Pattern matching with query patterns.
 * Multiple Languages::       Parse text written in multiple languages.
-* Develop with tree-sitter:: Develop packages using tree-sitter features.
 * Tree-sitter C API::        Compare the C API and the ELisp API.
 
 Syntax Descriptors
