@@ -340,6 +340,7 @@ Languages' for what does it mean to set ranges for a parser.")
   "Fontify the region between START and END.
 If LOUDLY is non-nil, message some debugging information."
   (tree-sitter-update-ranges start end)
+  (font-lock-unfontify-region start end)
   (dolist (setting tree-sitter-font-lock-settings)
     (when-let* ((language (nth 0 setting))
                 (match-pattern (nth 1 setting))
@@ -368,7 +369,8 @@ If LOUDLY is non-nil, message some debugging information."
                      start end face language)))))))))
   ;; Call regexp font-lock after tree-sitter, as it is usually used
   ;; for custom fontification.
-  (funcall #'font-lock-default-fontify-region start end loudly))
+  (let ((font-lock-unfontify-region-function #'ignore))
+    (funcall #'font-lock-default-fontify-region start end loudly)))
 
 (defun tree-sitter-font-lock-enable ()
   "Enable tree-sitter font-locking for the current buffer."
@@ -643,7 +645,7 @@ red."
   "Major mode for JSON documents."
   (setq-local tree-sitter-font-lock-defaults
               '((json-tree-sitter-settings-1)))
-  (tree-sitter-enable-font-lock))
+  (tree-sitter-font-lock-enable))
 
 (defvar json-tree-sitter-settings-1
   '(tree-sitter-json
@@ -678,7 +680,7 @@ and the lib name in string-face."
 
                     tree-sitter-simple-indent-rules
                     ts-c-tree-sitter-indent-rules)
-        (tree-sitter-enable-font-lock))
+        (tree-sitter-font-lock-enable))
     ;; Copied from cc-mode.
     (setq-local font-lock-defaults
                 '((c-font-lock-keywords
