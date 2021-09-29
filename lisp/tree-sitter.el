@@ -295,15 +295,14 @@ END of that region."
 
 Each SETTING should look like
 
-    (LANGUAGE PATTERN)
+    (LANGUAGE QUERY)
 
 Each SETTING controls one parser (often of different languages).
 LANGUAGE is the language symbol.  See Info node `(elisp)Language
 Definitions'.
 
-PATTERN is either a string pattern or a sexp pattern.
-See Info node `(elisp)Pattern Matching' for writing query
-pattern.
+QUERY is either a string query or a sexp query.
+See Info node `(elisp)Pattern Matching' for writing queries.
 
 Generally, major-modes should set
 `tree-sitter-font-lock-defaults', and let Emacs automatically
@@ -312,7 +311,7 @@ populate this variable.")
 (defvar-local tree-sitter-font-lock-defaults nil
   "Defaults for tree-sitter Font Lock specified by the major mode.
 
-This variable should be a list
+This variable should be a list of
 
     (DEFAULT :KEYWORD VALUE...)
 
@@ -327,7 +326,7 @@ The symbol DEFAULT (or each symbol in DEFAULT) should contain or
 return a SETTING as explained in
 `tree-sitter-font-lock-settings'.  Basically,
 
-    (LANGUAGE PATTERN)
+    (LANGUAGE QUERY)
 
 KEYWORD and VALUE are additional settings can could be used to
 alter fontification behavior.  Currently there aren't any.
@@ -340,9 +339,8 @@ Languages' for what does it mean to set ranges for a parser.")
 (defun tree-sitter-font-lock-fontify-region (start end &optional loudly)
   "Fontify the region between START and END.
 If LOUDLY is non-nil, message some debugging information."
-  (funcall #'font-lock-default-fontify-region start end loudly)
   (tree-sitter-update-ranges start end)
-  (dolist (setting font-lock-tree-sitter-settings)
+  (dolist (setting tree-sitter-font-lock-settings)
     (when-let* ((language (nth 0 setting))
                 (match-pattern (nth 1 setting))
                 (parser (tree-sitter-get-parser-create language)))
@@ -367,9 +365,12 @@ If LOUDLY is non-nil, message some debugging information."
                 (if loudly
                     (message
                      "Fontifying text from %d to %d Face: %s Language: %s"
-                     start end face language))))))))))
+                     start end face language)))))))))
+  ;; Call regexp font-lock after tree-sitter, as it is usually used
+  ;; for custom fontification.
+  (funcall #'font-lock-default-fontify-region start end loudly))
 
-(defun tree-sitter-enable-font-lock ()
+(defun tree-sitter-font-lock-enable ()
   "Enable tree-sitter font-locking for the current buffer."
   (setq-local tree-sitter-font-lock-settings
               (mapcar (lambda (elm) ; = (DEFAULT :setting ...)
@@ -452,9 +453,9 @@ TODO: examples in manual")
                            if (tree-sitter-node-eq node (cdr capture))
                            return t
                            finally return nil))))
-    (first-child . (lambda (node parent bol &rest _)
-                     (tree-sitter-node-start
-                      (tree-sitter-node-child parent 0 t))))
+    (first-sibling . (lambda (node parent bol &rest _)
+                       (tree-sitter-node-start
+                        (tree-sitter-node-child parent 0 t))))
 
     (parent . (lambda (node parent bol &rest _)
                 (tree-sitter-node-start
@@ -478,7 +479,7 @@ MATCHER:
 
 \(match NODE-TYPE PARENT-TYPE NODE-FIELD NODE-INDEX-MIN NODE-INDEX-MAX)
 
-    NODE-TYPE checks for node's type, PARENT-TYPE check for
+    NODE-TYPE checks for node's type, PARENT-TYPE checks for
     parent's type, NODE-FIELD checks for the filed name of node
     in the parent, NODE-INDEX-MIN and NODE-INDEX-MAX checks for
     the node's index in the parent.  Therefore, to match the
@@ -500,14 +501,14 @@ no-node
 
     Checks that the node has type TYPE.
 
-\(query PATTERN)
+\(query QUERY)
 
-    Queries the parent node with PATTERN, and checks if the node
-    is captured.
+    Queries the parent node with QUERY, and checks if the node
+    is captured (by any capture name).
 
 ANCHOR:
 
-first-child
+first-sibling
 
     Find the first child of the parent.
 
@@ -525,7 +526,7 @@ no-indent
 
 prev-line
 
-    Find the named node on previous line.  This can be used when
+    Find the named node on the previous line.  This can be used when
     indenting an empty line: just indent like the previous node.
 
 TODO: manual?")
@@ -563,9 +564,9 @@ and returns
 
 BOL is the position of the beginning of the line; NODE is the
 \"largest\" node that starts at BOL; PARENT is its parent; ANCHOR
-is a node, and OFFSET is a number.  Emacs finds the column of
-ANCHOR's start and adds OFFSET to it, as the final indentation of
-the current line.")
+is a point (not a node), and OFFSET is a number.  Emacs finds the
+column of ANCHOR and adds OFFSET to it, as the final indentation
+of the current line.")
 
 (defun tree-sitter-indent ()
   "Indent according to `tree-sitter-simple-indent-rules'."
@@ -640,8 +641,9 @@ red."
 
 (define-derived-mode json-mode js-mode "JSON"
   "Major mode for JSON documents."
-  (setq-local font-lock-tree-sitter-defaults
-              '((json-tree-sitter-settings-1))))
+  (setq-local tree-sitter-font-lock-defaults
+              '((json-tree-sitter-settings-1)))
+  (tree-sitter-enable-font-lock))
 
 (defvar json-tree-sitter-settings-1
   '(tree-sitter-json
@@ -664,17 +666,19 @@ and the lib name in string-face."
 (define-derived-mode ts-c-mode prog-mode "TS C"
   "C mode with tree-sitter support."
   (if (tree-sitter-should-enable-p)
-      (setq-local font-lock-tree-sitter-defaults
-                  '((ts-c-tree-sitter-settings-1))
+      (progn
+        (setq-local tree-sitter-font-lock-defaults
+                    '((ts-c-tree-sitter-settings-1))
 
-                  font-lock-defaults
-                  (ignore t nil nil nil)
+                    font-lock-defaults
+                    (ignore t nil nil nil)
 
-                  indent-line-function
-                  #'tree-sitter-indent
+                    indent-line-function
+                    #'tree-sitter-indent
 
-                  tree-sitter-simple-indent-rules
-                  ts-c-tree-sitter-indent-rules)
+                    tree-sitter-simple-indent-rules
+                    ts-c-tree-sitter-indent-rules)
+        (tree-sitter-enable-font-lock))
     ;; Copied from cc-mode.
     (setq-local font-lock-defaults
                 '((c-font-lock-keywords
@@ -725,7 +729,7 @@ and the lib name in string-face."
                               "argument_list" "parameter_list"
                               "field_declaration_list")
                 collect `((match nil ,type nil 0 0) parent 2)
-                collect `((match nil ,type nil 1) first-child 0)))))
+                collect `((match nil ,type nil 1) first-sibling 0)))))
 
 (defvar ts-c-tree-sitter-settings-1
   '(tree-sitter-c
