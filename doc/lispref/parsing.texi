@@ -5,7 +5,7 @@
 @node Parsing Program Source
 @chapter Parsing Program Source
 
-Emacs provides various ways to parse a program source and produce a
+Emacs provides various ways to parse program source text and produce a
 @dfn{syntax tree}.  In a syntax tree, text is no longer a
 one-dimensional stream but a structured tree of nodes, where each node
 representing a piece of text.  Thus a syntax tree can enable
