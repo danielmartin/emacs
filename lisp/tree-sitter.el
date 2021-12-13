@@ -297,14 +297,22 @@ Each SETTING should look like
 
     (LANGUAGE QUERY)
 
-Each SETTING controls one parser (often of different languages).
+Each SETTING controls one parser (often of different language).
 LANGUAGE is the language symbol.  See Info node `(elisp)Language
 Definitions'.
 
 QUERY is either a string query or a sexp query.
 See Info node `(elisp)Pattern Matching' for writing queries.
 
-Generally, major-modes should set
+Capture names in QUERY should be face names like
+`font-lock-keyword-face'.  The captured node will be fontified
+with that face.  Capture names can also be function names, in
+which case the function is called with (START END NODE), where
+START and END are the start and end position of the node in
+buffer, and NODE is the tree-sitter node object.  If a capture
+name is both a face and a function, face takes priority.
+
+Generally, major modes should set
 `tree-sitter-font-lock-defaults', and let Emacs automatically
 populate this variable.")
 
@@ -315,26 +323,26 @@ This variable should be a list of
 
     (DEFAULT :KEYWORD VALUE...)
 
-A DEFAULT may be a symbol (a variable or function whose value is
-the settings to use for fontification) or a list of
-symbols (specifying different levels of fontification).  If the
-symbol is both a variable and a function, it is used as a
-function.  Different levels of fontification can be controlled by
+A DEFAULT may be a symbol or a list of symbols (specifying
+different levels of fontification).  The symbol(s) can be of a
+variable or a function.  If a symbol is both a variable and a
+function, it is used as a function.  Different levels of
+fontification can be controlled by
 `font-lock-maximum-decoration'.
 
-The symbol DEFAULT (or each symbol in DEFAULT) should contain or
-return a SETTING as explained in
-`tree-sitter-font-lock-settings'.  Basically,
+The symbol(s) in DEFAULT should contain or return a SETTING as
+explained in `tree-sitter-font-lock-settings', which looks like
 
     (LANGUAGE QUERY)
 
-KEYWORD and VALUE are additional settings can could be used to
-alter fontification behavior.  Currently there aren't any.
+KEYWORD and VALUE are additional settings could be used to alter
+fontification behavior.  Currently there aren't any.
 
-For multi-language major-modes, you should provide range functions
-in `tree-sitter-range-functions', and Emacs will set the ranges
-before fontifing a region.  See Info node `(elisp)Multiple
-Languages' for what does it mean to set ranges for a parser.")
+Multi-language major-modes should provide a range function for
+eacn language it supports in `tree-sitter-range-functions', and
+Emacs will set the ranges accordingly before fontifing a region.
+See Info node `(elisp)Multiple Languages' for what does it mean
+to set ranges for a parser.")
 
 (defun tree-sitter-font-lock-fontify-region (start end &optional loudly)
   "Fontify the region between START and END.
@@ -362,11 +370,11 @@ If LOUDLY is non-nil, message some debugging information."
                 (cond ((facep face)
                        (put-text-property start end 'face face))
                       ((functionp face)
-                       (funcall face start end node)))
-                (if loudly
-                    (message
-                     "Fontifying text from %d to %d Face: %s Language: %s"
-                     start end face language)))))))))
+                       (funcall face start end node))
+                      (t (error "Capture name %s is neither a face nor a function" face)))
+                (when loudly
+                  (message "Fontifying text from %d to %d, Face: %s Language: %s"
+                           start end face language)))))))))
   ;; Call regexp font-lock after tree-sitter, as it is usually used
   ;; for custom fontification.
   (let ((font-lock-unfontify-region-function #'ignore))
@@ -375,10 +383,10 @@ If LOUDLY is non-nil, message some debugging information."
 (defun tree-sitter-font-lock-enable ()
   "Enable tree-sitter font-locking for the current buffer."
   (setq-local tree-sitter-font-lock-settings
-              (mapcar (lambda (elm) ; = (DEFAULT :setting ...)
+              (mapcar (lambda (elm) ; ELM = (DEFAULT :setting ...)
                         (font-lock-eval-keywords
                          (font-lock-choose-keywords
-                          (nth 0 elm) ; = DEFAULT
+                          (nth 0 elm) ; (nth 0 elm) = DEFAULT
 	                  (font-lock-value-in-major-mode
                            font-lock-maximum-decoration))))
                       tree-sitter-font-lock-defaults))
@@ -390,6 +398,9 @@ If LOUDLY is non-nil, message some debugging information."
 (defvar tree-sitter--indent-verbose t
   "If non-nil, log progress when indenting.")
 
+;; This is not bound locally like we normally do with major-mode
+;; stuff, because for tree-sitter, a buffer could contain more than
+;; one language.
 (defvar tree-sitter-simple-indent-rules nil
   "A list of indent rule settings.
 Each indent rule setting should be (LANGUAGE . RULES),
@@ -401,17 +412,17 @@ MATCHER determines whether this rule applies, ANCHOR and OFFSET
 together determines which column to indent to.
 
 A MATCHER is a function that takes three arguments (NODE PARENT
-BOL).  NODE is the largest (highest-in-tree) node starting at
-point.  PARENT is the parent of NODE.  BOL is the point where we
-are indenting: the beginning of line content, the position of the
-first non-whitespace character.
+BOL).  BOL is the point where we are indenting: the beginning of
+line content, the position of the first non-whitespace character.
+NODE is the largest (highest-in-tree) node starting at that
+point.  PARENT is the parent of NODE.
 
 If MATCHER returns non-nil, meaning the rule matches, Emacs then
 uses ANCHOR to find an anchor, it should be a function that takes
 the same argument (NODE PARENT BOL) and returns a point.
 
 Finally Emacs computes the column of that point returned by ANCHOR
-and adds OFFSET to it, and indent the line to that column.
+and adds OFFSET to it, and indents to that column.
 
 For MATCHER and ANCHOR, Emacs provides some convenient presets.
 See `tree-sitter-simple-indent-presets'.
@@ -551,8 +562,19 @@ corresponding value as the function."
          (apply (alist-get fn tree-sitter-simple-indent-presets)
                 args))
         ((functionp fn) (apply fn args))
-        (t (error "Couldn't find appropriate function for FN"))))
+        (t (error "Couldn't find the function corresponding to %s" fn))))
 
+;; This variable might seem unnecessary: why split
+;; `tree-sitter-indent' and `tree-sitter-simple-indent' into two
+;; functions?  We add this variable in between because later we might
+;; add more powerful indentation engines, and that new engine can
+;; probably share `tree-sitter-indent'.  It is also useful, suggested
+;; by Stefan M, to have a function that figures out how much to indent
+;; but doesn't actually performs the indentation, because we might
+;; want to know where will a node indent to if we put it at some other
+;; location, and use that information to calculate the actual
+;; indentation.  And `tree-sitter-simple-indent' is that function.  I
+;; forgot the example Stefan gave, but it makes a lot of sense.
 (defvar tree-sitter-indent-function #'tree-sitter-simple-indent
   "Function used by `tree-sitter-indent' to do some of the work.
 
@@ -567,11 +589,11 @@ and returns
 BOL is the position of the beginning of the line; NODE is the
 \"largest\" node that starts at BOL; PARENT is its parent; ANCHOR
 is a point (not a node), and OFFSET is a number.  Emacs finds the
-column of ANCHOR and adds OFFSET to it, as the final indentation
+column of ANCHOR and adds OFFSET to it as the final indentation
 of the current line.")
 
 (defun tree-sitter-indent ()
-  "Indent according to `tree-sitter-simple-indent-rules'."
+  "Indent according to the result of `tree-sitter-indent-function'."
   (tree-sitter-update-ranges)
   (pcase-let*
       ((orig-pos (point))
@@ -608,9 +630,15 @@ of the current line.")
           (indent-line-to col))))))
 
 (defun tree-sitter-simple-indent (node parent bol)
-  "Indent according to `tree-sitter-simple-indent-rules'.
+  "Calculate indentation according to `tree-sitter-simple-indent-rules'.
 
-For NODE, PARENT and BOL see `tree-sitter-indent'."
+BOL is the position of the first non-whitespace character on the
+current line.  NODE is the largest node that starts at BOL,
+PARENT is NODE's parent.
+
+Return (ANCHOR . OFFSET) where ANCHOR is a node, OFFSET is the
+indentation offset, meaning indent to align with ANCHOR and add
+OFFSET."
   (let* ((language (tree-sitter-node-language node))
          (rules (alist-get language tree-sitter-simple-indent-rules)))
     (cl-loop for rule in rules
@@ -628,9 +656,8 @@ For NODE, PARENT and BOL see `tree-sitter-indent'."
 (defun tree-sitter-check-indent (mode)
   "Check current buffer's indentation against a major mode MODE.
 
-Pops up a diff buffer showing the difference.  Correct
-indentation (target) is in green, current wrong indentation is in
-red."
+Pop up a diff buffer showing the difference.  Correct
+indentation (target) is in green, current indentation is in red."
   (interactive "CTarget major mode: ")
   (let ((source-buf (current-buffer)))
     (with-temp-buffer
@@ -639,7 +666,7 @@ red."
       (indent-region (point-min) (point-max))
       (diff-buffers source-buf (current-buffer)))))
 
-;;; Lab
+;;; Lab (remove before merge)
 
 (define-derived-mode json-mode js-mode "JSON"
   "Major mode for JSON documents."
@@ -919,7 +946,7 @@ uses the first parser in `tree-sitter-parser-list'."
           (remove '(:eval tree-sitter--inspect-name)
                   mode-line-misc-info))))
 
-;;; Tree-sitter devel
+;;; Etc
 
 (declare-function find-library-name "find-func.el")
 (defun tree-sitter--check-manual-covarage ()
@@ -942,6 +969,9 @@ uses the first parser in `tree-sitter-parser-list'."
          (with-temp-buffer
            (insert-file-contents (expand-file-name
                                   "doc/lispref/parsing.texi"
+                                  source-directory))
+           (insert-file-contents (expand-file-name
+                                  "doc/lispref/modes.texi"
                                   source-directory))
            (cl-sort
             (save-excursion

@@ -326,7 +326,9 @@ ts_check_buffer_size (struct buffer *buffer)
   ptrdiff_t buffer_size =
     (BUF_Z (buffer) - BUF_BEG (buffer));
   if (buffer_size > UINT32_MAX)
-    xsignal1 (Qtree_sitter_size_error, make_fixnum (buffer_size));
+    xsignal1 (Qtree_sitter_size_error,
+	      build_pure_c_string ("Buffer size too large, size:"),
+	      make_fixnum (buffer_size));
 }
 
 /* Parse the buffer.  We don't parse until we have to. When we have
